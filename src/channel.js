@@ -11,15 +11,22 @@ function start () {
   
   channel.on('connection', c => {
     if (socket) {
-      attachRequest(c)
+      return attachRequest(c)
     }
     socket = c
     console.log('connected')
+
+    c.on('close', () => {
+      console.log('disconneted')
+      socket = null
+      requestsFIFO.length = 0     
+    })
   })
 
   channel.on('close', () => {
     console.log('down')
     socket = null
+    requestsFIFO.length = 0
     start();
   })
 
@@ -49,6 +56,7 @@ exports.getSocket = function getSocket(callback) {
 }
 
 function attachRequest (c) {
+  console.log(c.remoteAddress, socket.remoteAddress)
   if (c.remoteAddress !== socket.remoteAddress) {
     return c.end()
   }

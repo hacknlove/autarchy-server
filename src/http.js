@@ -1,9 +1,9 @@
 const crypto = require('crypto');
 const { createServer } = require('net');
-const getSocket = require('./channel')
+const { getSocket } = require('./channel')
 
 const algorithm = 'aes-256-ctr';
-const key = process.env.PASSWORD;
+const password = process.env.PASSWORD;
 const secret = process.env.SECRET;
 
 const http = createServer()
@@ -21,8 +21,10 @@ start()
 
 async function proxy(incoming) {
   getSocket((channel, iv) => {
-    const ivDown = crypto.createHash('sha256').update(secret).update(iv).digest();
-    const ivUp = crypto.createHash('sha256').update(iv).update(secret).digest();
+    const hash = crypto.createHash('sha512').update(secret).update(iv).update(password).digest() 
+    const key = hash.slice(0, 32);
+    const ivDown = hash.slice(32, 48);
+    const ivUp = hash.slice(48, 64);
 
     const encrypt = crypto.createCipheriv(algorithm, key, ivDown) 
     const decrypt = crypto.createDecipheriv(algorithm, key, ivUp)
