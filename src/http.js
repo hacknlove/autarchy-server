@@ -20,7 +20,7 @@ function start () {
 start()
 
 function send404 (incoming) {
-  incoming.write("HTTP/2 404 Not Found\r\nServer: autharchy\r\nHTTP/2 404 Not Found\r\n\r\nNot Found\r\n\r\n")
+  incoming.write("HTTP/2 404 Not Found\r\nServer: autarchy\r\nHTTP/2 404 Not Found\r\n\r\nNot Found\r\n\r\n")
   incoming.end()
   return;
 }

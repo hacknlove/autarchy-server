@@ -1,4 +1,4 @@
-# autharchy-server
+# autarchy-server
 
 ## Server behaviour
 
