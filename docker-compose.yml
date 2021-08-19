@@ -1,0 +1,30 @@
+version: '3.2'
+services:
+  webapp:
+    restart: always
+    image: hacknlove/autarchy-server:latest
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200k"
+        max-file: "10"
+    environment:
+      PORT: 3000
+    expose:
+      - 3000
+    ports:
+      - 20000-20100:20000-20100
+    env_file: ./environment.sh
+    networks:
+      - web
+      - default
+    labels:
+      - "traefik.port=3000"
+      - "traefik.enable=true"
+      - "traefik.frontend.rule=Host:autarchy.dev"
+      - "traefik.docker.network=web"
+      - "traefik.frontend.auth.basic.users=auth:$$apr1$$3LJyzByF$$/ItH9Fo40.SvrDCLj48Co1"
+      # echo $(htpasswd -nb user password) | sed -e s/\\$/\\$\\$/g
+networks:
+  web:
+    external: true

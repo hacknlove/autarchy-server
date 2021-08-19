@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { createServer } = require('net');
+const { PassThrough } = require('stream');
 const { getSocket } = require('./channel')
 
 const algorithm = 'aes-256-ctr';
@@ -19,14 +20,53 @@ function start () {
 
 start()
 
+function sendMissingHost (incoming) {
+  incoming.write("HTTP/1.1 404 Missing host\r\nServer: autarchy\r\n")
+  incoming.end()
+  return;
+}
 function send404 (incoming) {
-  incoming.write("HTTP/2 404 Not Found\r\nServer: autarchy\r\nHTTP/2 404 Not Found\r\n\r\nNot Found\r\n\r\n")
+  incoming.write("HTTP/1.1 404 Not Found\r\nServer: autarchy\r\n")
   incoming.end()
   return;
 }
 
+const hostRegExp = /^Host: (.*)(\r\n|\n)/
+
+function getHost (incoming) {
+  const readHeader = new PassThrough()
+  incoming.pipe(readHeader)
+
+  return new Promise(resolve => {
+    let data = ''
+    function end() {
+      console.log('missing host')
+      resolve(false)
+    }
+
+    function addChunk (chunk) {
+      data += chunk.toString()
+      const host = data.match(hostRegExp)
+      if (host) {
+        readHeader.off('data', addChunk)
+        readHeader.off('end', end)
+        resolve(host[1])
+      }
+    }
+  
+    readHeader.on('data', addChunk)
+    readHeader.on('end', end)
+  })
+}
+
 async function proxy(incoming) {
-  getSocket((channel, iv) => {
+  const host = await getHost(incoming)
+
+  if (!host) {
+    return sendMissingHost(incoming)
+  }
+
+  getSocket(host, (channel, iv) => {
     if (!channel) {
       return send404(incoming)
     }

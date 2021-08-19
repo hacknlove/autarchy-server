@@ -1,78 +1,115 @@
+/* eslint-disable no-constant-condition */
 const crypto = require('crypto')
 const { createServer } = require('net')
 
-const channel = createServer()
+const channel = createServer({ pauseOnConnect: true, allowHalfOpen : true })
 
-const requestsFIFO = []
+const hosts = new Map()
+const domains = new Map()
 
-let socket
-
-function start () {
+async function handleConnection (socket) {
+  const id = socket.read(16)
+  if (id === null) {
+    await new Promise(resolve => setTimeout(resolve))
+    return handleConnection(socket)
+  }
   
-  channel.on('connection', c => {
-    if (socket) {
-      return attachRequest(c)
-    }
-    socket = c
-    console.log('connected')
+  const oldHost = hosts.get(id)
+  if (hosts.get(id)) {
+    attachRequest(socket, oldHost.requests)
+    return
+  }
 
-    c.on('close', () => {
-      console.log('disconneted')
-      socket = null
-      requestsFIFO.length = 0     
-    })
+  console.log('connected', id.toString('hex'))
+
+  const host = {
+    socket,
+    requests: new Map()
+  }
+
+  hosts.set(id, host)
+
+  let data
+
+  function addDomains (chunk) {
+    data += chunk
+    const domain = data.match(/^(.+)\n(.*)$/)
+    if (!domain) {
+      return
+    }
+    if (domain[1]) {
+      domains.set(domain, id)
+      data = domain[2]
+      return
+    }
+    socket.off('data', addDomains);
+  }
+
+  socket.on('data', addDomains)
+
+  socket.on('close', () => {
+    console.log('disconneted', id)
+    hosts[id].requestsFIFO.forEach(([callback]) => callback())
+    delete hosts[id]
   })
+}
+
+function main () {
+  channel.on('connection', handleConnection)
 
   channel.on('close', () => {
     console.log('down')
-    socket = null
-    requestsFIFO.length = 0
-    start();
+
+    Object.entries(hosts).forEach(([id, { requestsFIFO }]) => {
+      delete hosts[id]
+      requestsFIFO.forEach(([callback]) => callback)
+    })
+
+    listen()
   })
+}
 
-
+function listen () {
   channel.listen(process.env.CHANNEL)
-  
   console.log('listening at', process.env.CHANNEL)
 }
 
-const ivGenerator = (function* getIv () {
-  let iv
-  let clearIv
-  while (true) {
-    iv = iv || crypto.randomBytes(64)
-    clearTimeout(clearIv)
-    clearIv = setTimeout(() => iv = null, 100)
-    yield iv
-  }
-})()
 
-exports.getSocket = function getSocket(callback) {
-  if (!socket) {
+exports.getSocket = function getSocket(domain, callback) {
+  const id = domains.get(domain)
+  const host = hosts.get(id)
+
+  if (!host) {
     return callback()
   }
-  const { value: iv } = ivGenerator.next()
-
-  requestsFIFO.push([callback, iv])
-
-  socket.write(iv)
+  do {
+    const requestId = crypto.randomBytes(4)
+    if (host.requests.has(requestId)) {
+      continue
+    }
+    host.requests.set(requestId, callback)
+    host.socket.write(requestId)
+  } while(false)
 }
 
-function attachRequest (c) {
-  console.log(c.remoteAddress, socket.remoteAddress)
-  if (c.remoteAddress !== socket.remoteAddress) {
-    return c.end()
+async function attachRequest (socket, requests) {
+  let iv = socket.read(32)
+  if (iv === null) {
+    await new Promise(resolve => setTimeout(resolve))
+    return handleConnection(socket)
   }
 
-  const request = requestsFIFO.shift()
+  const requestId = iv.subarray(0, 4)
 
-  if (!request) {
-    return c.end()
+  const callback = requests.get(requestId)
+
+  if (!callback) {
+    return socket.end()
   }
 
-  const [callback, iv] = request
-
-  callback(c, iv)
+  socket.resume()
+  callback(socket, iv)
 }
 
-start()
+main()
+listen()
