@@ -48,6 +48,9 @@ const ivGenerator = (function* getIv () {
 })()
 
 exports.getSocket = function getSocket(callback) {
+  if (!socket) {
+    return callback()
+  }
   const { value: iv } = ivGenerator.next()
 
   requestsFIFO.push([callback, iv])
