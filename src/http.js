@@ -19,17 +19,16 @@ function start () {
 
 start()
 
+function send404 (incoming) {
+  incoming.write("HTTP/2 404 Not Found\r\nServer: autharchy\r\nHTTP/2 404 Not Found\r\n\r\nNot Found\r\n\r\n")
+  incoming.end()
+  return;
+}
+
 async function proxy(incoming) {
   getSocket((channel, iv) => {
     if (!channel) {
-      incoming.write('HTTP/2 404 Not Found\r\n')
-      incoming.write('Server: autharchy\r\n')
-      incoming.write('HTTP/2 404 Not Found\r\n')
-      incoming.write('\r\n')
-      incoming.write('Not Found\r\n')
-      incoming.write('\r\n')
-      incoming.end()
-      return;
+      return send404(incoming)
     }
     const hash = crypto.createHash('sha512').update(secret).update(iv).update(password).digest() 
     const key = hash.slice(0, 32);
