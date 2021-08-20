@@ -1,21 +1,18 @@
-const crypto = require('crypto');
-const { createServer } = require('net');
-const { PassThrough } = require('stream');
+const { createServer } = require('net')
 const { getSocket } = require('./channel')
+const ReadableStreamClone = require("readable-stream-clone")
+const { PassThrough } = require('stream')
+const readNBytes = require('./readNBytes')
 
-const algorithm = 'aes-256-ctr';
-const password = process.env.PASSWORD;
-const secret = process.env.SECRET;
-
-const http = createServer()
+const rawHttp = createServer()
 
 function start () {
   
-  http.listen(process.env.PORT || 80)
+  rawHttp.listen(process.env.PORT || 80)
 
-  http.on('close', start)
+  rawHttp.on('close', start)
 
-  http.on('connection', proxy)
+  rawHttp.on('connection', proxy)
 }
 
 start()
@@ -23,62 +20,39 @@ start()
 function sendMissingHost (incoming) {
   incoming.write("HTTP/1.1 404 Missing host\r\nServer: autarchy\r\n")
   incoming.end()
-  return;
 }
 function send404 (incoming) {
-  incoming.write("HTTP/1.1 404 Not Found\r\nServer: autarchy\r\n")
+  incoming.write("HTTP/1.1 404 Not Found\r\nServer: autarchy\r\n\r\nNot found")
   incoming.end()
-  return;
 }
 
-const hostRegExp = /^Host: (.*)(\r\n|\n)/
+const hostRegExp = /^Host: (.*)(\r\n|\n)/im
 
-function getHost (incoming) {
+async function getHost (incoming) {
   const readHeader = new PassThrough()
   incoming.pipe(readHeader)
-
-  return new Promise(resolve => {
-    let data = ''
-    function end() {
-      console.log('missing host')
-      resolve(false)
-    }
-
-    function addChunk (chunk) {
-      data += chunk.toString()
-      const host = data.match(hostRegExp)
-      if (host) {
-        readHeader.off('data', addChunk)
-        readHeader.off('end', end)
-        resolve(host[1])
-      }
-    }
+  const data = (await readNBytes({ socket: readHeader, n: undefined })).toString()
   
-    readHeader.on('data', addChunk)
-    readHeader.on('end', end)
-  })
+  const host = data.match(hostRegExp)
+
+  return host[1]
 }
 
-async function proxy(incoming) {
-  const host = await getHost(incoming)
+async function proxy(socket) {
+  const incomming = new ReadableStreamClone(socket)
+  const host = await getHost(new ReadableStreamClone(socket))
 
   if (!host) {
-    return sendMissingHost(incoming)
+    return sendMissingHost(socket)
   }
 
-  getSocket(host, (channel, iv) => {
+  getSocket(host, (channel, encrypt, decrypt) => {
     if (!channel) {
-      return send404(incoming)
+      console.log('404')
+      return send404(socket)
     }
-    const hash = crypto.createHash('sha512').update(secret).update(iv).update(password).digest() 
-    const key = hash.slice(0, 32);
-    const ivDown = hash.slice(32, 48);
-    const ivUp = hash.slice(48, 64);
 
-    const encrypt = crypto.createCipheriv(algorithm, key, ivDown) 
-    const decrypt = crypto.createDecipheriv(algorithm, key, ivUp)
-
-    incoming.pipe(encrypt).pipe(channel)
-    channel.pipe(decrypt).pipe(incoming)
+    incomming.pipe(encrypt).pipe(channel)
+    channel.pipe(decrypt).pipe(socket)
   })
 }

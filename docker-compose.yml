@@ -15,6 +15,7 @@ services:
     ports:
       - 20000-20100:20000-20100
     env_file: ./environment.sh
+    volume: ./config.js:/home/node/app/config.js
     networks:
       - web
       - default
@@ -22,6 +23,7 @@ services:
       - "traefik.port=3000"
       - "traefik.enable=true"
       - "traefik.frontend.rule=Host:autarchy.dev"
+      - "traefik.frontend.rule=HostRegexp:{subdomain:[a-z]+}.autarchy.dev"
       - "traefik.docker.network=web"
       - "traefik.frontend.auth.basic.users=auth:$$apr1$$3LJyzByF$$/ItH9Fo40.SvrDCLj48Co1"
       # echo $(htpasswd -nb user password) | sed -e s/\\$/\\$\\$/g

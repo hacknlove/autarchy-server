@@ -17,3 +17,26 @@ The server decrypts the data before sending it to the origen of the request with
 ## Client behaviour
 
 The client is responsible for reading the request, sending it to the specific service and returning the response through the same socket.
+
+## Server configuration
+
+```javascript
+// ./config.js
+module.exports = {
+  clients: {
+    '00000000': {
+      domains: [
+        'foo.autarchy.dev',
+        'bar.autarchy.dev',
+      ],
+      secret: 'SECRET'
+    },
+    ...
+  }
+}
+```
+
+* clientId is any 8 bytes length string
+* domains is an array with the domains that can be redirected to the user
+* secret is used for hashing and encryption
+

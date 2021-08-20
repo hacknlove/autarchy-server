@@ -1,57 +1,70 @@
 /* eslint-disable no-constant-condition */
 const crypto = require('crypto')
 const { createServer } = require('net')
+const { hosts, domains } = require('./config')
+const readNBytes = require('./readNBytes')
 
-const channel = createServer({ pauseOnConnect: true, allowHalfOpen : true })
-
-const hosts = new Map()
-const domains = new Map()
+const algorithm = 'aes-256-ctr';
+const channel = createServer({ pauseOnConnect: true })
 
 async function handleConnection (socket) {
-  const id = socket.read(16)
-  if (id === null) {
-    await new Promise(resolve => setTimeout(resolve))
-    return handleConnection(socket)
-  }
+  const clientId = (await readNBytes({ socket, n: 8 })).toString()
   
-  const oldHost = hosts.get(id)
-  if (hosts.get(id)) {
-    attachRequest(socket, oldHost.requests)
+  const host = hosts.get(clientId)
+
+  if (!host) {
+    socket.write('Bad clientId')
+    socket.end()
+    console.log('Bad clientId', clientId)
     return
   }
 
-  console.log('connected', id.toString('hex'))
+  if (host.socket) {
+    return attachRequest(host, socket)
+  }
+  
+  newClient(host, socket)
+}
 
-  const host = {
-    socket,
-    requests: new Map()
+async function attachRequest (host, socket) {
+  const requestId = (await readNBytes({ socket, n: 4 })).toString('hex')
+  const iv = await readNBytes({ socket, n: 32 })
+  const callback = host.requests.get(requestId)
+
+  if (!callback) {
+    console.log('no callback for', host.clientId, requestId)
+    return socket.end()
   }
 
-  hosts.set(id, host)
+  const hash = crypto.createHash('sha512')
+    .update(host.secret)
+    .update(requestId)
+    .update(iv)
+    .digest()
+  const key = hash.slice(0, 32);
+  const ivDown = hash.slice(32, 48);
+  const ivUp = hash.slice(48, 64);
 
-  let data
+  const encrypt = crypto.createCipheriv(algorithm, key, ivDown) 
+  const decrypt = crypto.createDecipheriv(algorithm, key, ivUp)
 
-  function addDomains (chunk) {
-    data += chunk
-    const domain = data.match(/^(.+)\n(.*)$/)
-    if (!domain) {
-      return
-    }
-    if (domain[1]) {
-      domains.set(domain, id)
-      data = domain[2]
-      return
-    }
-    socket.off('data', addDomains);
-  }
+  socket.resume()
+  callback(socket, encrypt, decrypt)
+}
 
-  socket.on('data', addDomains)
+function newClient (host, socket) {
+  console.log('connected', host.clientId)
+
+  host.socket = socket
+
 
   socket.on('close', () => {
-    console.log('disconneted', id)
-    hosts[id].requestsFIFO.forEach(([callback]) => callback())
-    delete hosts[id]
+    console.log('disconneted', socket.clientId)
+    host.requests.forEach((callback) => callback())
+    host.requests.clear()
+    host.socket = null
   })
+  socket.resume()
 }
 
 function main () {
@@ -60,9 +73,11 @@ function main () {
   channel.on('close', () => {
     console.log('down')
 
-    Object.entries(hosts).forEach(([id, { requestsFIFO }]) => {
-      delete hosts[id]
-      requestsFIFO.forEach(([callback]) => callback)
+    hosts.forEach((host) => {
+      host.socket.end()
+      host.socket = null
+      host.requests.forEach(callback => callback())
+      host.requests.clear()
     })
 
     listen()
@@ -74,12 +89,11 @@ function listen () {
   console.log('listening at', process.env.CHANNEL)
 }
 
-
 exports.getSocket = function getSocket(domain, callback) {
-  const id = domains.get(domain)
-  const host = hosts.get(id)
+  const clientId = domains.get(domain)
+  const host = hosts.get(clientId)
 
-  if (!host) {
+  if (!host || !host.socket) {
     return callback()
   }
   do {
@@ -87,29 +101,12 @@ exports.getSocket = function getSocket(domain, callback) {
     if (host.requests.has(requestId)) {
       continue
     }
-    host.requests.set(requestId, callback)
+    host.requests.set(requestId.toString('hex'), callback)
     host.socket.write(requestId)
   } while(false)
 }
 
-async function attachRequest (socket, requests) {
-  let iv = socket.read(32)
-  if (iv === null) {
-    await new Promise(resolve => setTimeout(resolve))
-    return handleConnection(socket)
-  }
 
-  const requestId = iv.subarray(0, 4)
-
-  const callback = requests.get(requestId)
-
-  if (!callback) {
-    return socket.end()
-  }
-
-  socket.resume()
-  callback(socket, iv)
-}
 
 main()
 listen()
